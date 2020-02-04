@@ -74,7 +74,7 @@ module KubernetesMetadata
                 "from Kubernetes API #{@apiVersion} endpoint " \
                 "#{@kubernetes_url}: #{e.message}"
       message += " (#{e.response})" if e.respond_to?(:response)
-      log.debug(message)
+      log.error(message)
 
       raise Fluent::ConfigError, message
     end
@@ -88,13 +88,22 @@ module KubernetesMetadata
       if ENV['K8S_NODE_NAME']
         options[:field_selector] = 'spec.nodeName=' + ENV['K8S_NODE_NAME']
       end
+      log.info(
+        "get_pods_and_start_watcher: Initially list all pods with #{options}.")
       pods = @client.get_pods(options)
       pods.each do |pod|
         cache_key = pod.metadata['uid']
+        log.debug(
+         "get_pods_and_start_watcher: Extracted pod uid #{cache_key}.")
         @cache[cache_key] = parse_pod_metadata(pod)
+        log.debug(
+         "get_pods_and_start_watcher: Cached pod metadata " \
+         "#{@cache[cache_key]}.")
         @stats.bump(:pod_cache_host_updates)
       end
       options[:resource_version] = pods.resourceVersion
+      log.info(
+        "get_pods_and_start_watcher: Setting up pod watch with #{options}.")
       watcher = @client.watch_pods(options)
       watcher
     end
@@ -105,12 +114,23 @@ module KubernetesMetadata
         case notice.type
           when 'MODIFIED'
             cache_key = notice.object['metadata']['uid']
+            log.debug(
+             "process_pod_watcher_notices: Extracted pod uid #{cache_key}.")
             cached    = @cache[cache_key]
+            log.debug(
+             "get_pods_and_start_watcher: Looked up cached pod metadata " \
+             "#{cached}.")
             if cached
               @cache[cache_key] = parse_pod_metadata(notice.object)
+              log.debug(
+               "get_pods_and_start_watcher: Modified cached pod metadata " \
+               "#{@cache[cache_key]}.")
               @stats.bump(:pod_cache_watch_updates)
             elsif ENV['K8S_NODE_NAME'] == notice.object['spec']['nodeName'] then
               @cache[cache_key] = parse_pod_metadata(notice.object)
+              log.debug(
+               "get_pods_and_start_watcher: Added new pod metadata to cache " \
+               "#{@cache[cache_key]}.")
               @stats.bump(:pod_cache_host_updates)
             else
               @stats.bump(:pod_cache_watch_misses)
