@@ -28,30 +28,30 @@ module KubernetesMetadata
       # Fluent:ConfigError, so that users can inspect potential errors in
       # the configuration.
       pod_watcher = start_pod_watch
-      Thread.current[:pod_watch_retry_backoff_interval] = @watch_retry_interval
-      Thread.current[:pod_watch_retry_count] = 0
+      pod_watch_retry_backoff_interval = @watch_retry_interval
+      pod_watch_retry_count = 0
 
       # Any failures / exceptions in the followup watcher notice
       # processing will be swallowed and retried. These failures /
       # exceptions could be caused by Kubernetes API being temporarily
       # down. We assume the configuration is correct at this point.
-      while thread_current_running?
+      while true
         begin
           pod_watcher ||= get_pods_and_start_watcher
           process_pod_watcher_notices(pod_watcher)
         rescue Exception => e
           @stats.bump(:pod_watch_failures)
-          if Thread.current[:pod_watch_retry_count] < @watch_retry_max_times
+          if pod_watch_retry_count < @watch_retry_max_times
             # Instead of raising exceptions and crashing Fluentd, swallow
             # the exception and reset the watcher.
             log.info(
               "Exception encountered parsing pod watch event. The " \
               "connection might have been closed. Sleeping for " \
-              "#{Thread.current[:pod_watch_retry_backoff_interval]} " \
+              "#{pod_watch_retry_backoff_interval} " \
               "seconds and resetting the pod watcher.", e)
-            sleep(Thread.current[:pod_watch_retry_backoff_interval])
-            Thread.current[:pod_watch_retry_count] += 1
-            Thread.current[:pod_watch_retry_backoff_interval] *= @watch_retry_exponential_backoff_base
+            sleep(pod_watch_retry_backoff_interval)
+            pod_watch_retry_count += 1
+            pod_watch_retry_backoff_interval *= @watch_retry_exponential_backoff_base
             pod_watcher = nil
           else
             # Since retries failed for many times, log as errors instead
@@ -74,7 +74,7 @@ module KubernetesMetadata
                 "from Kubernetes API #{@apiVersion} endpoint " \
                 "#{@kubernetes_url}: #{e.message}"
       message += " (#{e.response})" if e.respond_to?(:response)
-      log.debug(message)
+      log.error(message)
 
       raise Fluent::ConfigError, message
     end
@@ -88,13 +88,22 @@ module KubernetesMetadata
       if ENV['K8S_NODE_NAME']
         options[:field_selector] = 'spec.nodeName=' + ENV['K8S_NODE_NAME']
       end
+      log.info(
+        "get_pods_and_start_watcher: Initially list all pods with #{options}.")
       pods = @client.get_pods(options)
       pods.each do |pod|
         cache_key = pod.metadata['uid']
+        log.debug(
+         "get_pods_and_start_watcher: Extracted pod uid #{cache_key}.")
         @cache[cache_key] = parse_pod_metadata(pod)
+        log.debug(
+         "get_pods_and_start_watcher: Cached pod metadata " \
+         "#{@cache[cache_key]}.")
         @stats.bump(:pod_cache_host_updates)
       end
       options[:resource_version] = pods.resourceVersion
+      log.info(
+        "get_pods_and_start_watcher: Setting up pod watch with #{options}.")
       watcher = @client.watch_pods(options)
       watcher
     end
@@ -105,12 +114,23 @@ module KubernetesMetadata
         case notice.type
           when 'MODIFIED'
             cache_key = notice.object['metadata']['uid']
+            log.debug(
+             "process_pod_watcher_notices: Extracted pod uid #{cache_key}.")
             cached    = @cache[cache_key]
+            log.debug(
+             "get_pods_and_start_watcher: Looked up cached pod metadata " \
+             "#{cached}.")
             if cached
               @cache[cache_key] = parse_pod_metadata(notice.object)
+              log.debug(
+               "get_pods_and_start_watcher: Modified cached pod metadata " \
+               "#{@cache[cache_key]}.")
               @stats.bump(:pod_cache_watch_updates)
             elsif ENV['K8S_NODE_NAME'] == notice.object['spec']['nodeName'] then
               @cache[cache_key] = parse_pod_metadata(notice.object)
+              log.debug(
+               "get_pods_and_start_watcher: Added new pod metadata to cache " \
+               "#{@cache[cache_key]}.")
               @stats.bump(:pod_cache_host_updates)
             else
               @stats.bump(:pod_cache_watch_misses)
