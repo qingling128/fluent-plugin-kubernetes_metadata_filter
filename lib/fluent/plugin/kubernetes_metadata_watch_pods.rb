@@ -103,7 +103,7 @@ module KubernetesMetadata
       end
       options[:resource_version] = pods.resourceVersion
       log.error(
-        "get_pods_and_start_watcher: Setting up pod watch with #{option}.")
+        "get_pods_and_start_watcher: Setting up pod watch with #{options}.")
       watcher = @client.watch_pods(options)
       watcher
     end
@@ -119,7 +119,7 @@ module KubernetesMetadata
             cached    = @cache[cache_key]
             log.error(
              "get_pods_and_start_watcher: Looked up cached pod metadata " \
-             "#{cache}.")
+             "#{cached}.")
             if cached
               @cache[cache_key] = parse_pod_metadata(notice.object)
               log.error(
