@@ -74,11 +74,15 @@ module KubernetesMetadata
         options[:field_selector] = 'spec.nodeName=' + ENV['K8S_NODE_NAME']
       end
       pods = @client.get_pods(options)
+      pod_count = 0
       pods.each do |pod|
+        pod_count += 1
         cache_key = pod.metadata['uid']
         @cache[cache_key] = parse_pod_metadata(pod)
         @stats.bump(:pod_cache_host_updates)
       end
+      log.error("pod_count = #{pod_count}")
+      log.error("options = #{options.inspect}")
       options[:resource_version] = pods.resourceVersion
       watcher = @client.watch_pods(options)
       watcher
