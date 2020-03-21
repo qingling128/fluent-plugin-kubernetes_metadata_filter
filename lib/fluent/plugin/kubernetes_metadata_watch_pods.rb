@@ -28,7 +28,7 @@ module KubernetesMetadata
       # Fluent:ConfigError, so that users can inspect potential errors in
       # the configuration.
       pod_watcher = start_pod_watch
-      Thread.current[:pod_watch_retry_backoff_interval] = @watch_retry_interval
+      enable_retry_backoff = false
 
       # Any failures / exceptions in the followup watcher notice
       # processing will be swallowed and retried. These failures /
@@ -46,11 +46,10 @@ module KubernetesMetadata
             log.info(
               "Exception encountered parsing pod watch event. The " \
               "connection might have been closed. Sleeping for " \
-              "#{Thread.current[:pod_watch_retry_backoff_interval]} " \
+              "#{@watch_retry_interval} " \
               "seconds and resetting the pod watcher.", e)
-            sleep(Thread.current[:pod_watch_retry_backoff_interval])
+            sleep(@watch_retry_interval)
             Thread.current[:pod_watch_retry_count] += 1
-            Thread.current[:pod_watch_retry_backoff_interval] *= @watch_retry_exponential_backoff_base
             pod_watcher = nil
           else
             # Since retries failed for many times, log as errors instead
