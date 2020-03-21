@@ -105,9 +105,11 @@ module KubernetesMetadata
               @stats.bump(:pod_cache_watch_misses)
             end
           when 'DELETED'
+            cache_key = notice.object['metadata']['uid']
             # ignore and let age out for cases where pods
             # deleted but still processing logs
             @stats.bump(:pod_cache_watch_delete_ignored)
+            @cache.delete(cache_key)
           when 'ERROR'
             message = notice['object']['message'] if notice['object'] && notice['object']['message']
             raise "Error while watching pods: #{message}"
